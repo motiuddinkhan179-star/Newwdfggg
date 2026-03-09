@@ -1,0 +1,228 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (matches auth.uid)
+    // Fields:
+    //   - uid: string (required, matches auth.uid)
+    //   - displayName: string (optional)
+    //   - email: string (required, email format)
+    //   - photoURL: string (optional, url format)
+    //   - createdAt: string (required, ISO 8601 date)
+    //   - likedListings: list of strings (optional)
+    //   - following: list of strings (optional)
+    //
+    // Collection: listings
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required, min 3, max 100)
+    //   - description: string (required, min 10, max 2000)
+    //   - price: number (required, positive)
+    //   - category: string (required)
+    //   - condition: string (required)
+    //   - images: list of strings (optional, max 10 images, valid URLs)
+    //   - sellerId: string (required, matches auth.uid)
+    //   - sellerName: string (optional)
+    //   - sellerPhotoURL: string (optional)
+    //   - createdAt: string (required, ISO 8601 date)
+    //   - status: string (required, enum: 'active', 'sold', 'deleted')
+    //   - location: string (optional)
+    //
+    // Collection: conversations
+    // Document ID: auto-generated
+    // Fields:
+    //   - participants: list of strings (required, 2 uids)
+    //   - lastMessage: string (optional)
+    //   - lastMessageTimestamp: string (required, ISO 8601 date)
+    //   - listingId: string (optional)
+    //
+    // Subcollection: messages (under conversations)
+    // Document ID: auto-generated
+    // Fields:
+    //   - conversationId: string (required, matches parent id)
+    //   - senderId: string (required, matches auth.uid)
+    //   - text: string (required, max 1000 chars)
+    //   - timestamp: string (required, ISO 8601 date)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user owns the resource (for user-owned documents)
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check if user is owner based on document's uid field
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    // Verify UID hasn't been tampered with on create
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    // Ensure uid field is not modified on update
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == resource.data.uid;
+    }
+
+    // Validate required fields exist
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Validate string length
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    // Validate URL format (must start with https:// or http://)
+    function isValidUrl(url) {
+      return url is string &&
+        (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // Validate email format
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Validate ISO 8601 date string format (YYYY-MM-DDTHH:MM:SS)
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // Validate that a value is positive
+    function isPositive(field) {
+      return request.resource.data[field] is number && request.resource.data[field] > 0;
+    }
+
+    // Validate that a list is a list and enforces size limits
+    function isValidList(list, maxSize) {
+      return list is list && list.size() <= maxSize;
+    }
+
+    // Validate optional string (if present, must be string and within length)
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !('field' in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    // Validate that the document contains only the allowed fields
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Validate that the document hasn't changed in the fields that are not allowed to be changed
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'email', 'photoURL', 'createdAt', 'likedListings', 'following']) &&
+             hasRequiredFields(['uid', 'email', 'createdAt']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.createdAt is string && isValidDateString(data.createdAt) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && isValidUrl(data.photoURL))) &&
+             (!('likedListings' in data) || (isValidList(data.likedListings, 1000))) &&
+             (!('following' in data) || (isValidList(data.following, 1000)));
+    }
+
+    function isValidListing(data) {
+      return hasOnlyAllowedFields(['title', 'description', 'price', 'category', 'condition', 'images', 'sellerId', 'sellerName', 'sellerPhotoURL', 'createdAt', 'status', 'location']) &&
+             hasRequiredFields(['title', 'description', 'price', 'category', 'condition', 'sellerId', 'createdAt', 'status']) &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 100 &&
+             data.description is string && data.description.size() >= 10 && data.description.size() <= 2000 &&
+             data.price is number && data.price >= 0 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 50 &&
+             data.condition is string && data.condition.size() > 0 && data.condition.size() < 50 &&
+             data.sellerId is string && data.sellerId == request.auth.uid &&
+             data.createdAt is string && isValidDateString(data.createdAt) &&
+             data.status is string && (data.status == 'active' || data.status == 'sold' || data.status == 'deleted') &&
+             (!('images' in data) || (isValidList(data.images, 10))) && // TODO: validate each image URL
+             (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() < 100)) &&
+             (!('sellerPhotoURL' in data) || (data.sellerPhotoURL is string && isValidUrl(data.sellerPhotoURL))) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 200));
+    }
+
+    function isValidConversation(data) {
+      return hasOnlyAllowedFields(['participants', 'lastMessage', 'lastMessageTimestamp', 'listingId']) &&
+             hasRequiredFields(['participants', 'lastMessageTimestamp']) &&
+             data.participants is list && data.participants.size() == 2 &&
+             data.participants.hasAll([request.auth.uid]) &&
+             data.lastMessageTimestamp is string && isValidDateString(data.lastMessageTimestamp) &&
+             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() < 1000)) &&
+             (!('listingId' in data) || (data.listingId is string));
+    }
+
+    function isValidMessage(data) {
+      return hasOnlyAllowedFields(['conversationId', 'senderId', 'text', 'timestamp']) &&
+             hasRequiredFields(['conversationId', 'senderId', 'text', 'timestamp']) &&
+             data.conversationId is string &&
+             data.senderId is string && data.senderId == request.auth.uid &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 1000 &&
+             data.timestamp is string && isValidDateString(data.timestamp);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && uidNotModified();
+      allow delete: if isOwner(userId);
+    }
+
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidListing(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.sellerId == request.auth.uid && isValidListing(request.resource.data) && areImmutableFieldsUnchanged(['sellerId', 'createdAt']);
+      allow delete: if isAuthenticated() && resource.data.sellerId == request.auth.uid;
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() && resource.data.participants.hasAny([request.auth.uid]);
+      allow create: if isAuthenticated() && isValidConversation(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.participants.hasAny([request.auth.uid]) && isValidConversation(request.resource.data);
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && 
+                    get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]);
+        allow create: if isAuthenticated() && 
+                      get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]) &&
+                      isValidMessage(request.resource.data);
+      }
+    }
+  }
+}

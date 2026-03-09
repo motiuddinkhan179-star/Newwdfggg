@@ -1,5 +1,9 @@
 {
   "name": "Classifieds Marketplace",
   "description": "An OLX-like classifieds marketplace application with user authentication and listing management.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
 }

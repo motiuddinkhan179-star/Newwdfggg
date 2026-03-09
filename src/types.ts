@@ -19,4 +19,6 @@ export interface Listing {
   createdAt: string;
   updatedAt?: string;
   status: 'active' | 'sold' | 'deleted';
+  location?: string;
+  condition: string;
 }

@@ -1,36 +1,75 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { createListing, uploadImage } from '../services/listingService';
-import { useNavigate } from 'react-router-dom';
+import { getListingById, updateListing, uploadImage } from '../services/listingService';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Camera, Upload, MapPin, Loader2 } from 'lucide-react';
+import { Camera, MapPin, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 
-const createListingSchema = z.object({
+const editListingSchema = z.object({
   title: z.string().min(5, 'Title must be at least 5 characters'),
   description: z.string().min(20, 'Description must be at least 20 characters'),
   price: z.number().min(1, 'Price must be greater than 0'),
   category: z.string().min(1, 'Please select a category'),
   location: z.string().min(3, 'Location is required'),
   condition: z.string().min(1, 'Please select condition'),
+  status: z.string().min(1, 'Please select status'),
 });
 
-type CreateListingForm = z.infer<typeof createListingSchema>;
+type EditListingForm = z.infer<typeof editListingSchema>;
 
 const CATEGORIES = ['Electronics', 'Vehicles', 'Property', 'Fashion', 'Sports', 'Furniture', 'Other'];
 const CONDITIONS = ['New', 'Like New', 'Good', 'Fair', 'Poor'];
+const STATUSES = ['active', 'sold', 'deleted'];
 
-export default function CreateListing() {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<CreateListingForm>({
-    resolver: zodResolver(createListingSchema),
+export default function EditListing() {
+  const { id } = useParams<{ id: string }>();
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<EditListingForm>({
+    resolver: zodResolver(editListingSchema),
   });
   const navigate = useNavigate();
   const { user } = useAuth();
   const [images, setImages] = useState<File[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [existingImages, setExistingImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchListing = async () => {
+      if (!id) return;
+      try {
+        const listing = await getListingById(id);
+        if (listing.sellerId !== user?.uid) {
+          toast.error('You do not have permission to edit this listing');
+          navigate('/my-ads');
+          return;
+        }
+        reset({
+          title: listing.title,
+          description: listing.description,
+          price: listing.price,
+          category: listing.category,
+          location: listing.location || '',
+          condition: listing.condition,
+          status: listing.status,
+        });
+        if (listing.images && listing.images.length > 0) {
+          setExistingImages(listing.images);
+          setImagePreview(listing.images[0]);
+        }
+      } catch (error) {
+        console.error('Error fetching listing:', error);
+        toast.error('Failed to load listing details');
+        navigate('/my-ads');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchListing();
+  }, [id, user, reset, navigate]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -40,17 +79,14 @@ export default function CreateListing() {
     }
   };
 
-  const onSubmit = async (data: CreateListingForm) => {
-    if (!user) {
-      toast.error('You must be logged in to create a listing');
-      return;
-    }
+  const onSubmit = async (data: EditListingForm) => {
+    if (!user || !id) return;
 
     try {
-      const uploadedImageUrls: string[] = [];
+      let uploadedImageUrls = [...existingImages];
       
-      // Upload images if any are selected
       if (images.length > 0) {
+        uploadedImageUrls = []; // Replace existing image for simplicity in this demo
         for (const file of images) {
           try {
             const url = await uploadImage(file, `listings/${user.uid}/${Date.now()}_${file.name}`);
@@ -62,25 +98,27 @@ export default function CreateListing() {
         }
       }
 
-      const listingData: any = {
+      await updateListing(id, {
         ...data,
-        sellerId: user.uid,
-        sellerName: user.displayName || 'Anonymous',
+        status: data.status as "active" | "sold" | "deleted",
         images: uploadedImageUrls,
-      };
+      });
       
-      if (user.photoURL) {
-        listingData.sellerPhotoURL = user.photoURL;
-      }
-
-      await createListing(listingData);
-      toast.success('Listing created successfully!');
-      navigate('/');
+      toast.success('Listing updated successfully!');
+      navigate('/my-ads');
     } catch (error) {
-      console.error('Error creating listing:', error);
-      toast.error('Failed to create listing. Please try again.');
+      console.error('Error updating listing:', error);
+      toast.error('Failed to update listing. Please try again.');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="animate-spin h-8 w-8 text-indigo-600" />
+      </div>
+    );
+  }
 
   return (
     <motion.div 
@@ -90,14 +128,14 @@ export default function CreateListing() {
     >
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="bg-indigo-600 px-6 py-8 text-white text-center">
-          <h1 className="text-3xl font-bold">Sell an Item</h1>
-          <p className="text-indigo-100 mt-2">Reach thousands of buyers in your community</p>
+          <h1 className="text-3xl font-bold">Edit Listing</h1>
+          <p className="text-indigo-100 mt-2">Update your item details</p>
         </div>
         
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 md:p-8 space-y-6">
           {/* Image Upload */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">Photos</label>
+            <label className="block text-sm font-medium text-gray-700">Photo</label>
             <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-xl hover:border-indigo-500 transition-colors cursor-pointer bg-gray-50 hover:bg-indigo-50 group relative">
               <div className="space-y-1 text-center">
                 {imagePreview ? (
@@ -109,6 +147,7 @@ export default function CreateListing() {
                         e.preventDefault();
                         setImagePreview(null);
                         setImages([]);
+                        setExistingImages([]);
                       }}
                       className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"
                     >
@@ -141,7 +180,6 @@ export default function CreateListing() {
               type="text"
               {...register('title')}
               className="mt-1 block w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-3 px-4 bg-gray-50 focus:bg-white transition-colors"
-              placeholder="What are you selling?"
             />
             {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
           </div>
@@ -186,7 +224,6 @@ export default function CreateListing() {
                   step="0.01"
                   {...register('price', { valueAsNumber: true })}
                   className="block w-full pl-7 rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-3 px-4 bg-gray-50 focus:bg-white transition-colors"
-                  placeholder="0.00"
                 />
               </div>
               {errors.price && <p className="mt-1 text-sm text-red-600">{errors.price.message}</p>}
@@ -202,11 +239,22 @@ export default function CreateListing() {
                   type="text"
                   {...register('location')}
                   className="block w-full pl-10 rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-3 px-4 bg-gray-50 focus:bg-white transition-colors"
-                  placeholder="City, Neighborhood"
                 />
               </div>
               {errors.location && <p className="mt-1 text-sm text-red-600">{errors.location.message}</p>}
             </div>
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Status</label>
+            <select
+              {...register('status')}
+              className="mt-1 block w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-3 px-4 bg-gray-50 focus:bg-white transition-colors"
+            >
+              {STATUSES.map(status => <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>)}
+            </select>
+            {errors.status && <p className="mt-1 text-sm text-red-600">{errors.status.message}</p>}
           </div>
 
           {/* Description */}
@@ -216,7 +264,6 @@ export default function CreateListing() {
               {...register('description')}
               rows={4}
               className="mt-1 block w-full rounded-xl border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-3 px-4 bg-gray-50 focus:bg-white transition-colors"
-              placeholder="Describe what you are selling..."
             />
             {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
           </div>
@@ -230,10 +277,10 @@ export default function CreateListing() {
               {isSubmitting ? (
                 <>
                   <Loader2 className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" />
-                  Posting...
+                  Updating...
                 </>
               ) : (
-                'Post Ad Now'
+                'Update Ad'
               )}
             </button>
           </div>

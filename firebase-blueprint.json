@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Listing": {
+      "title": "Listing",
+      "description": "A product or service listing",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "condition": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "sellerId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "sellerPhotoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "sold", "deleted"] },
+        "location": { "type": "string" }
+      },
+      "required": ["title", "description", "price", "category", "condition", "sellerId", "createdAt", "status"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A chat conversation between two users",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageTimestamp": { "type": "string", "format": "date-time" },
+        "listingId": { "type": "string" }
+      },
+      "required": ["participants", "lastMessageTimestamp"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message in a conversation",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "senderId", "text", "timestamp"]
+    }
+  },
+  "firestore": {
+    "listings/{listingId}": {
+      "schema": "Listing",
+      "description": "Listings collection"
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Users collection"
+    },
+    "conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Conversations collection"
+    },
+    "conversations/{conversationId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages subcollection"
+    }
+  }
+}
